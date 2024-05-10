@@ -2,12 +2,38 @@ const fs = require("fs");
 const express = require("express");
 const router = express.Router();
 const UserModel = require("./models/User");
+const ExperienceModel = require("./models/Experience");
 
 //#region functions
+const getAllUsers = async () => {
+  const users = await UserModel.find();
+  return users;
+};
+
 const getUsersFromFile = () => {
   const rawData = fs.readFileSync("developers.json");
   const usersData = JSON.parse(rawData);
   return usersData;
+};
+
+const createExperienceCollection = async () => {
+  const users = await getAllUsers();
+  const result = users.map((user) => {
+    let skillLevel;
+    if (user.experience < 2) {
+      skillLevel = "junior";
+    } else if (user.experience >= 2 && user.experience <= 4) {
+      skillLevel = "middle";
+    } else {
+      skillLevel = "senior";
+    }
+    return {
+      developerId: user._id,
+      skillLevel: skillLevel,
+    };
+  });
+
+  return result;
 };
 //#endregion
 
@@ -29,6 +55,16 @@ router.post("/create", async (req, res) => {
     res.send(result);
   } catch (err) {
     console.error(err);
+  }
+});
+
+router.post("/create-experience-collection", async (req, res) => {
+  try {
+    const experienceCollection = await createExperienceCollection();
+    const result = await ExperienceModel.insertMany(experienceCollection);
+    res.status(200).send(result);
+  } catch (err) {
+    console.log(err);
   }
 });
 
@@ -56,6 +92,24 @@ router.get("/group", async (req, res) => {
     ]);
 
     res.send(averageAge);
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+router.get("/group-by-age", async (req, res) => {
+  try {
+    const averageAgeByGroup = await UserModel.aggregate([
+      {
+        $group: {
+          _id: null, // "$age"
+          averageAge: { $avg: "$age" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.send(averageAgeByGroup);
   } catch (err) {
     console.error(err);
   }
@@ -195,7 +249,7 @@ router.get("/out", async (req, res) => {
       { $out: "usersByAgeRange" },
     ]);
 
-    res.send("Results has been saved in collection usersByAgeRange");
+    res.send("Results have been saved in collection usersByAgeRange");
   } catch (err) {
     console.error(err);
     res.status(500).send(err.message);
@@ -275,6 +329,42 @@ router.get("/bucket", async (req, res) => {
     ]);
 
     res.send(ageBuckets);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send(err.message);
+  }
+});
+
+router.get("/lookup", async (req, res) => {
+  try {
+    const result = await UserModel.aggregate([
+      {
+        $lookup: {
+          from: "experiences",
+          localField: "_id",
+          foreignField: "developerId",
+          as: "experienceData",
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          age: 1,
+          skills: 1,
+          experienceData: { $arrayElemAt: ["$experienceData", 0] },
+        },
+      },
+      {
+        $project: {
+          name: 1,
+          age: 1,
+          skills: 1,
+          skillLevel: "$experienceData.skillLevel",
+        },
+      },
+    ]);
+
+    res.send(result);
   } catch (err) {
     console.error(err);
     res.status(500).send(err.message);
